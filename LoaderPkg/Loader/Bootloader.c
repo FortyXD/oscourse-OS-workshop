@@ -104,6 +104,7 @@ InitGraphics (
     return Status;
   }
 
+  
   //
   // LAB 1: Your code here.
   //
@@ -113,10 +114,57 @@ InitGraphics (
   //
   // Hint: Use QueryMode/SetMode functions.
   //
-
   //
   // Fill screen with black.
   //
+
+  DEBUG((DEBUG_INFO,"------------------------------------\n"));
+  DEBUG((DEBUG_INFO,"YA NE PONIMAU\n"));
+  DEBUG((DEBUG_INFO,"-----------------------------------\n"));
+  
+// Mode: 0, Resolution: 1280x800
+// Mode: 1, Resolution: 640x480
+// Mode: 2, Resolution: 800x480
+// Mode: 3, Resolution: 800x600
+// Mode: 4, Resolution: 832x624
+// Mode: 5, Resolution: 960x640
+// Mode: 6, Resolution: 1024x600
+// Mode: 7, Resolution: 1024x768
+// Mode: 8, Resolution: 1152x864
+// Mode: 9, Resolution: 1152x870
+// Mode: 10, Resolution: 1280x720
+// Mode: 11, Resolution: 1280x760
+// Mode: 12, Resolution: 1280x768
+// Mode: 13, Resolution: 1280x960
+// Mode: 14, Resolution: 1280x1024
+// Mode: 15, Resolution: 1360x768
+// Mode: 16, Resolution: 1366x768
+// Mode: 17, Resolution: 1400x1050
+// Mode: 18, Resolution: 1440x900
+// Mode: 19, Resolution: 1600x900
+// Mode: 20, Resolution: 1600x1200
+// Mode: 21, Resolution: 1680x1050
+// Mode: 22, Resolution: 1920x1080
+// Mode: 23, Resolution: 1920x1200
+// Mode: 24, Resolution: 1920x1440
+// Mode: 25, Resolution: 2000x2000
+// Mode: 26, Resolution: 2048x1536
+// Mode: 27, Resolution: 2048x2048
+// Mode: 28, Resolution: 2560x1440
+// Mode: 29, Resolution: 2560x1600
+
+  // EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *Info;
+  // UINTN SizeInfo;
+  // for (UINT32 mode = 0; mode < GraphicsOutput->Mode->MaxMode; mode++){
+  //     GraphicsOutput->QueryMode(GraphicsOutput,mode,&SizeInfo,&Info);
+  //     DEBUG((DEBUG_INFO, "Mode: %d, Resolution: %dx%d\n",mode, Info->HorizontalResolution,Info->VerticalResolution));
+  // }
+
+  GraphicsOutput->SetMode(GraphicsOutput,10);
+
+
+
+
   GraphicsOutput->Blt (
     GraphicsOutput,
     &mBlackColour,
@@ -257,7 +305,7 @@ GetKernelFile (
   )
 {
   EFI_STATUS                       Status;
-  EFI_LOADED_IMAGE_PROTOCOL        *LoadedImage;
+  EFI_LOADED_IMAGE_PROTOCOL        *LoadedImage = NULL;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *FileSystem;
   EFI_FILE_PROTOCOL                *CurrentDriveRoot;
   EFI_FILE_PROTOCOL                *KernelFile;
@@ -275,7 +323,11 @@ GetKernelFile (
   // get loader's containing device.
   //
   // LAB 1: Your code here
-  (void)LoadedImage;
+  Status = gBS->HandleProtocol (
+    gImageHandle,
+    &gEfiLoadedImageProtocolGuid,
+    (void**) &LoadedImage
+  );
 
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "JOS: Cannot find LoadedImage protocol - %r\n", Status));
@@ -293,7 +345,12 @@ GetKernelFile (
   // to read the kernel from it later.
   //
   // LAB 1: Your code here
-  (void)FileSystem;
+  Status = gBS->HandleProtocol(
+    LoadedImage->DeviceHandle,
+    &gEfiSimpleFileSystemProtocolGuid,
+    (void**) &FileSystem
+  );
+
 
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "JOS: Cannot find own FileSystem protocol - %r\n", Status));
@@ -305,7 +362,10 @@ GetKernelFile (
   // NOTE: Don't forget to Use ->Close after you've done using it.
   //
   // LAB 1: Your code here
-  (void)CurrentDriveRoot;
+  Status = FileSystem->OpenVolume(
+    FileSystem,
+    &CurrentDriveRoot
+  );
 
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "JOS: Cannot access own file system - %r\n", Status));
@@ -317,7 +377,14 @@ GetKernelFile (
   // for reading (as EFI_FILE_MODE_READ)
   //
   // LAB 1: Your code here
-  KernelFile = NULL;
+  Status = CurrentDriveRoot->Open(
+    CurrentDriveRoot,
+    &KernelFile,
+    KERNEL_PATH,
+    EFI_FILE_MODE_READ,
+    0
+  );
+  CurrentDriveRoot->Close(CurrentDriveRoot);
 
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "JOS: Cannot access own file system - %r\n", Status));
@@ -987,15 +1054,15 @@ UefiMain (
   UINTN              EntryPoint;
   VOID               *GateData;
 
-#if 1 ///< Uncomment to await debugging
-  volatile BOOLEAN   Connected;
-  DEBUG ((DEBUG_INFO, "JOS: Awaiting debugger connection\n"));
+// #if 1 ///< Uncomment to await debugging
+//   volatile BOOLEAN   Connected;
+//   DEBUG ((DEBUG_INFO, "JOS: Awaiting debugger connection\n"));
 
-  Connected = FALSE;
-  while (!Connected) {
-    ;
-  }
-#endif
+//   Connected = FALSE;
+//   while (!Connected) {
+//     ;
+//   }
+// #endif
 
   Status = gRT->GetTime (&Now, NULL);
   if (EFI_ERROR (Status)) {
