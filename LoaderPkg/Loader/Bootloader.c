@@ -105,7 +105,6 @@ InitGraphics (
   }
 
   
-  //
   // LAB 1: Your code here.
   //
   // Switch to the maximum or any other resolution of your preference.

@@ -19,6 +19,7 @@
 int mon_help(int argc, char **argv, struct Trapframe *tf);
 int mon_kerninfo(int argc, char **argv, struct Trapframe *tf);
 int mon_backtrace(int argc, char **argv, struct Trapframe *tf);
+int mon_ping(int argc, char **argv, struct Trapframe *tf);
 
 struct Command {
     const char *name;
@@ -31,6 +32,8 @@ static struct Command commands[] = {
         {"help", "Display this list of commands", mon_help},
         {"kerninfo", "Display information about the kernel", mon_kerninfo},
         {"backtrace", "Print stack backtrace", mon_backtrace},
+        {"ping", "Print pong", mon_ping},
+
 };
 #define NCOMMANDS (sizeof(commands) / sizeof(commands[0]))
 
@@ -60,6 +63,28 @@ mon_kerninfo(int argc, char **argv, struct Trapframe *tf) {
 int
 mon_backtrace(int argc, char **argv, struct Trapframe *tf) {
     // LAB 2: Your code here
+    cprintf("Stack backtrace:\n");
+    struct Ripdebuginfo dbg;
+    uint64_t rbp = read_rbp();
+    uint64_t rip = (uint64_t) * ((uint64_t*)rbp + 1);
+    while (rbp != 0) {
+        int32_t res;
+        cprintf("   rbp %016lx  rip %016lx\n", rbp, rip);
+        res = debuginfo_rip((uintptr_t)rip, (struct Ripdebuginfo *)&dbg);
+        if (res == 0) {
+          cprintf("     %s:%d: %s+%lu\n", dbg.rip_file, dbg.rip_line, dbg.rip_fn_name, rip - dbg.rip_fn_addr);
+        } else {
+          cprintf("     information not available...\n");
+        }
+        rbp = (uint64_t) *(uint64_t *)rbp;
+        rip = (uint64_t) *((uint64_t *)rbp + 1);
+    }
+    return 0;
+}
+
+int
+mon_ping(int argc, char **argv, struct Trapframe *tf) {
+    cprintf("Pong\n");
 
     return 0;
 }
