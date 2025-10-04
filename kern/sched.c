@@ -34,8 +34,10 @@ sched_yield(void) {
             env_run(&envs[i]);
         }
     }
-    if (curenv && curenv->env_status == ENV_RUNNING) {
+    if (curenv) {
+        if (curenv->env_status == ENV_RUNNING){
         env_run(curenv);
+        }
     }
     cprintf("Halt\n");
 
