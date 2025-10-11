@@ -119,6 +119,24 @@ mon_frequency(int argc, char **argv, struct Trapframe *tf) {
     return 0;
 }
 
+/* Implement timer_start (mon_start), timer_stop (mon_stop), timer_freq (mon_frequency) commands. */
+// LAB 5: Your code here:
+
+int
+mon_start(int argc, char **argv, struct Trapframe *tf) {
+    return 0;
+}
+
+int
+mon_stop(int argc, char **argv, struct Trapframe *tf) {
+    return 0;
+}
+
+int
+mon_frequency(int argc, char **argv, struct Trapframe *tf) {
+    return 0;
+}
+
 // LAB 4: Your code here
 int
 mon_dumpcmos(int argc, char **argv, struct Trapframe *tf) {
