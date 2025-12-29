@@ -19,7 +19,7 @@
  * Destroys the environment on memory errors. */
 static int
 sys_cputs(const char *s, size_t len) {
-    // LAB 8: Your code here
+    // LAB 8: Your code here DONE
 
     /* Check that the user has permission to read memory [s, s+len).
      * Destroy the environment if not. */
@@ -31,7 +31,6 @@ sys_cputs(const char *s, size_t len) {
     for (int i = 0; i < len; i++) {
         cputchar(*(s + i));
     }
-
     return 0;
 }
 
@@ -39,17 +38,17 @@ sys_cputs(const char *s, size_t len) {
  * Returns the character, or 0 if there is no input waiting. */
 static int
 sys_cgetc(void) {
-    // LAB 8: Your code here
+    // LAB 8: Your code here DONE
 
-   return cons_getc();
+    return cons_getc();
 }
 
 /* Returns the current environment's envid. */
 static envid_t
 sys_getenvid(void) {
-    // LAB 8: Your code here
+    // LAB 8: Your code here DONE
+
     return curenv->env_id;
-    return 0;
 }
 
 /* Destroy a given environment (possibly the currently running environment).
@@ -59,10 +58,10 @@ sys_getenvid(void) {
  *      or the caller doesn't have permission to change envid. */
 static int
 sys_env_destroy(envid_t envid) {
-    // LAB 8: Your code here.
+    // LAB 8: Your code here DONE
+    struct Env *env = NULL;
 
-    struct Env *env;
-    if (envid2env(envid, &env, 1) < 0) {
+    if (envid2env(envid, &env, false)) {
         return -E_BAD_ENV;
     }
 
@@ -74,14 +73,16 @@ sys_env_destroy(envid_t envid) {
                 curenv->env_id, env->env_id);
     }
 #endif
-	env_destroy(env);
+    env_destroy(env);
+
     return 0;
 }
 
 /* Deschedule current environment and pick a different one to run. */
 static void
 sys_yield(void) {
-    // LAB 9: Your code here
+    // LAB 9: Your code here DONE
+    sched_yield();
 }
 
 /* Allocate a new environment.
@@ -96,8 +97,17 @@ sys_exofork(void) {
      * from the current environment -- but tweaked so sys_exofork
      * will appear to return 0. */
 
-    // LAB 9: Your code here
-    return 0;
+    // LAB 9: Your code here DONE
+    int status = 0;
+    struct Env *child_env = NULL;
+    status = env_alloc(&child_env, curenv->env_id, ENV_TYPE_USER);
+    if (status < 0) {
+        return status;
+    }
+    child_env->env_status = ENV_NOT_RUNNABLE;
+    child_env->env_tf = curenv->env_tf;
+    child_env->env_tf.tf_regs.reg_rax = 0;
+    return child_env->env_id;
 }
 
 /* Set envid's env_status to status, which must be ENV_RUNNABLE
@@ -115,8 +125,17 @@ sys_env_set_status(envid_t envid, int status) {
      * check whether the current environment has permission to set
      * envid's status. */
 
-    // LAB 9: Your code here
+    // LAB 9: Your code here DONE
+    struct Env *env = NULL;
+    if (envid2env(envid, &env, true) < 0) {
+        return -E_BAD_ENV;
+    }
 
+    if (status != ENV_RUNNABLE && status != ENV_NOT_RUNNABLE) {
+        return -E_INVAL;
+    }
+
+    env->env_status = status;
     return 0;
 }
 
@@ -130,7 +149,13 @@ sys_env_set_status(envid_t envid, int status) {
  *      or the caller doesn't have permission to change envid. */
 static int
 sys_env_set_pgfault_upcall(envid_t envid, void *func) {
-    // LAB 9: Your code here:
+    // LAB 9: Your code here: DONE
+    struct Env *env = NULL;
+    if (envid2env(envid, &env, 1) < 0) {
+        return -E_BAD_ENV;
+    }
+
+    env->env_pgfault_upcall = func;
 
     return 0;
 }
@@ -160,7 +185,30 @@ sys_env_set_pgfault_upcall(envid_t envid, void *func) {
  *      or to allocate any necessary page tables. */
 static int
 sys_alloc_region(envid_t envid, uintptr_t addr, size_t size, int perm) {
-    // LAB 9: Your code here:
+    // LAB 9: Your code here: DONE
+    struct Env *env = NULL;
+    if (envid2env(envid, &env, 1) < 0) {
+        return -E_BAD_ENV;
+    }
+
+    if (addr >= MAX_USER_ADDRESS || addr & CLASS_MASK(0)) {
+        return -E_INVAL;
+    }
+
+    if (!(perm & PROT_ALL)) {
+        return -E_INVAL;
+    }
+
+    if (perm & ALLOC_ONE) {
+        perm = perm & ~ALLOC_ZERO;
+    } else {
+        perm = perm | ALLOC_ZERO;
+        perm = perm & ~ALLOC_ONE;
+    }
+
+    if (map_region(&env->address_space, addr, NULL, 0, size, perm | PROT_USER_ | PROT_LAZY) < 0) {
+        return -E_NO_MEM;
+    }
 
     return 0;
 }
@@ -188,7 +236,29 @@ sys_alloc_region(envid_t envid, uintptr_t addr, size_t size, int perm) {
 static int
 sys_map_region(envid_t srcenvid, uintptr_t srcva,
                envid_t dstenvid, uintptr_t dstva, size_t size, int perm) {
-    // LAB 9: Your code here
+    // LAB 9: Your code here DONE
+    struct Env *src = NULL;
+    struct Env *dst = NULL;
+
+    if (envid2env(srcenvid, &src, true) < 0 || envid2env(dstenvid, &dst, true) < 0) {
+        return -E_BAD_ENV;
+    }
+
+    if (srcva >= MAX_USER_ADDRESS || srcva & CLASS_MASK(0)) {
+        return -E_INVAL;
+    }
+
+    if (dstva >= MAX_USER_ADDRESS || dstva & CLASS_MASK(0)) {
+        return -E_INVAL;
+    }
+
+    if (!(perm & PROT_ALL) || perm & ALLOC_ZERO || perm & ALLOC_ONE) {
+        return -E_INVAL;
+    }
+
+    if (map_region(&dst->address_space, dstva, &src->address_space, srcva, size, perm | PROT_USER_) < 0) {
+        return -E_NO_MEM;
+    }
 
     return 0;
 }
@@ -204,8 +274,17 @@ static int
 sys_unmap_region(envid_t envid, uintptr_t va, size_t size) {
     /* Hint: This function is a wrapper around unmap_region(). */
 
-    // LAB 9: Your code here
+    // LAB 9: Your code here DONE
+    struct Env *env = NULL;
+    if (envid2env(envid, &env, true) < 0) {
+        return -E_BAD_ENV;
+    }
 
+    if (va >= MAX_USER_ADDRESS || va & CLASS_MASK(0)) {
+        return -E_INVAL;
+    }
+
+    unmap_region(&env->address_space, va, size);
     return 0;
 }
 
@@ -249,10 +328,57 @@ sys_unmap_region(envid_t envid, uintptr_t va, size_t size) {
  *      current environment's address space.
  *  -E_NO_MEM if there's not enough memory to map srcva in envid's
  *      address space. */
+extern int user_mem_check(struct Env *env, const void *va, size_t len, int perm);
 static int
 sys_ipc_try_send(envid_t envid, uint32_t value, uintptr_t srcva, size_t size, int perm) {
-    // LAB 9: Your code here
+    // LAB 9: Your code here DONE
+    struct Env *dst = NULL;
 
+    if (envid2env(envid, &dst, 0) < 0) {
+        return -E_BAD_ENV;
+    }
+
+    if (!dst->env_ipc_recving) {
+        return -E_IPC_NOT_RECV;
+    }
+
+    if (srcva < MAX_USER_ADDRESS && srcva & CLASS_MASK(0)) {
+        return -E_INVAL;
+    }
+
+    if (srcva < MAX_USER_ADDRESS && dst->env_ipc_dstva < MAX_USER_ADDRESS) {
+        // page alignment
+        if (srcva & CLASS_MASK(0) || dst->env_ipc_dstva & CLASS_MASK(0)) {
+            return -E_INVAL;
+        }
+
+        // perm check
+        if (!(perm & PROT_ALL) || (perm & ALLOC_ONE) || (perm & ALLOC_ZERO)) {
+            return -E_INVAL;
+        }
+
+        // mapping and write permission check
+        if ((perm & PROT_W) && user_mem_check(curenv, (void *)srcva, size, PROT_W) < 0) {
+            return -E_INVAL;
+        }
+
+        // trying to map region with min length to dstva
+        size_t min = MIN(size, dst->env_ipc_maxsz);
+
+        if (map_region(&dst->address_space, dst->env_ipc_dstva, &curenv->address_space, srcva,
+                       min, perm | PROT_USER_) < 0) {
+            return -E_NO_MEM;
+        }
+
+        dst->env_ipc_perm = perm;
+    } else {
+        dst->env_ipc_perm = 0;
+    }
+
+    dst->env_ipc_recving = 0;
+    dst->env_ipc_from = curenv->env_id;
+    dst->env_ipc_value = value;
+    dst->env_status = ENV_RUNNABLE;
     return 0;
 }
 
@@ -271,17 +397,76 @@ sys_ipc_try_send(envid_t envid, uint32_t value, uintptr_t srcva, size_t size, in
  *  -E_INVAL if maxsize is not page aligned. */
 static int
 sys_ipc_recv(uintptr_t dstva, uintptr_t maxsize) {
-    // LAB 9: Your code here
+    // LAB 9: Your code here DONE
+    if (maxsize & CLASS_MASK(0)) {
+        return -E_INVAL;
+    }
+
+    if (dstva < MAX_USER_ADDRESS) {
+        if (!maxsize || dstva & CLASS_MASK(0)) {
+            return -E_INVAL;
+        }
+
+        curenv->env_ipc_dstva = dstva;
+        curenv->env_ipc_maxsz = maxsize;
+    }
+
+    curenv->env_status = ENV_NOT_RUNNABLE;
+    curenv->env_ipc_recving = 1;
+    curenv->env_tf.tf_regs.reg_rax = 0;
+    sched_yield();
 
     return 0;
+}
+
+#if LAB >= 10
+/* Map region of physical memory to the userspace address.
+ * This is meant to be used by the userspace drivers, of which
+ * the only one currently is the filesystem server.
+ *
+ * Return 0 on succeeds, < 0 on error. Erros are:
+ *  -E_BAD_ENV if environment envid doesn't currently exist,
+ *      or the caller doesn't have permission to change envid.
+ *  -E_BAD_ENV if is not a filesystem driver (ENV_TYPE_FS).
+ *  -E_INVAL if va >= MAX_USER_ADDRESS, or va is not page-aligned.
+ *  -E_INVAL if pa is not page-aligned.
+ *  -E_INVAL if size is not page-aligned.
+ *  -E_INVAL if prem contains invalid flags
+ *     (including PROT_SHARE, PROT_COMBINE or PROT_LAZY).
+ *  -E_NO_MEM if address does not exist.
+ *  -E_NO_ENT if address is already used. */
+static int
+sys_map_physical_region(uintptr_t pa, envid_t envid, uintptr_t va, size_t size, int perm) {
+    // LAB 10: Your code here DONE
+    struct Env *env = NULL;
+    if ((envid2env(envid, &env, false) < 0) || (env->env_type != ENV_TYPE_FS)) {
+        return -E_BAD_ENV;
+    }
+
+    int is_inval = (va >= MAX_USER_ADDRESS ||
+                    PAGE_OFFSET(va) ||
+                    PAGE_OFFSET(pa) ||
+                    PAGE_OFFSET(size) ||
+                    size > MAX_USER_ADDRESS ||
+                    MAX_USER_ADDRESS - va < size ||
+                    perm & (PROT_SHARE | PROT_COMBINE | PROT_LAZY));
+
+    if (is_inval) return -E_INVAL;
+
+
+    return map_physical_region(&(env->address_space), va, pa, size, perm | PROT_USER_ | MAP_USER_MMIO);
 }
 
 static int
 sys_region_refs(uintptr_t addr, size_t size, uintptr_t addr2, uintptr_t size2) {
-    // LAB 10: Your code here
+    // LAB 10: Your code here DONE
+    if (addr2 >= MAX_USER_ADDRESS) {
+        return region_maxref(&curenv->address_space, addr, size);
+    }
 
-    return 0;
+    return region_maxref(&curenv->address_space, addr, size) - region_maxref(&curenv->address_space, addr2, size2);
 }
+#endif
 
 /* Dispatches to the correct kernel function, passing the arguments. */
 uintptr_t
@@ -289,16 +474,59 @@ syscall(uintptr_t syscallno, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t
     /* Call the function corresponding to the 'syscallno' parameter.
      * Return any appropriate return value. */
 
-    // LAB 8: Your code here
-    // LAB 9: Your code here
-
-    if (syscallno == SYS_cputs) {
+    // LAB 8: Your code here DONE
+    // LAB 9: Your code here DONE
+    // LAB 10: Your code here DONE
+    // switch (syscallno) {
+    // case SYS_cputs:
+    //     return sys_cputs((const char *)a1, (size_t)a2);
+    // case SYS_cgetc:
+    //     return sys_cgetc();
+    // case SYS_getenvid:
+    //     return sys_getenvid();
+    // case SYS_env_destroy:
+    //     return sys_env_destroy((envid_t)a1);
+    // default:
+    //     return -E_NO_SYS;
+    // }
+    switch (syscallno) {
+    case SYS_cputs:
         return sys_cputs((const char *)a1, (size_t)a2);
-    } else if (syscallno == SYS_cgetc) {
+    case SYS_cgetc:
         return sys_cgetc();
-    } else if (syscallno == SYS_getenvid) {
+    case SYS_getenvid:
         return sys_getenvid();
-    } else if (syscallno == SYS_env_destroy) {
+    case SYS_env_destroy:
         return sys_env_destroy((envid_t)a1);
+    case SYS_alloc_region:
+        return sys_alloc_region((envid_t)a1, (uintptr_t)a2, (size_t)a3, (int)a4);
+    case SYS_map_region:
+        return sys_map_region((envid_t)a1, (uintptr_t)a2, (envid_t)a3, (uintptr_t)a4, (size_t)a5, (int)a6);
+#if LAB >= 10
+    case SYS_map_physical_region:
+        return sys_map_physical_region((uintptr_t)a1, (envid_t)a2, (uintptr_t)a3, (size_t)a4, (int)a5);
+    case SYS_region_refs:
+        return sys_region_refs((uintptr_t)a1, (size_t)a2, (uintptr_t)a3, (uintptr_t)a4);
+#endif
+    case SYS_unmap_region:
+        return sys_unmap_region((envid_t)a1, (uintptr_t)a2, (size_t)a3);
+    case SYS_exofork:
+        return sys_exofork();
+    case SYS_env_set_status:
+        return sys_env_set_status((envid_t)a1, (int)a2);
+    // case SYS_env_set_trapframe:
+    //     return sys_env_set_trapframe((envid_t)a1, (struct Trapframe*)a2);
+    case SYS_env_set_pgfault_upcall:
+        return sys_env_set_pgfault_upcall((envid_t)a1, (void *)a2);
+    case SYS_yield:
+        sys_yield();
+    case SYS_ipc_try_send:
+        return sys_ipc_try_send((envid_t)a1, (uint32_t)a2, (uintptr_t)a3, (size_t)a4, (int)a5);
+    case SYS_ipc_recv:
+        return sys_ipc_recv((uintptr_t)a1, (uintptr_t)a2);
+    default:
+        return -E_NO_SYS;
     }
-    return -E_NO_SYS;}
+
+    return -E_NO_SYS;
+}
