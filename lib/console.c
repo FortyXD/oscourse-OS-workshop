@@ -15,6 +15,8 @@ int
 getchar(void) {
     unsigned char c;
 
+    /* sys_cgetc does not block, but getchar should. */
+    while (!(c = sys_cgetc()));
     /* JOS does, however, support standard _input_ redirection,
      * allowing the user to redirect script files to the shell and such.
      * getchar() reads a character from file descriptor 0. */

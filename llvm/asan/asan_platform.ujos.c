@@ -67,22 +67,13 @@ platform_abort() {
 
 static bool
 asan_shadow_allocator(struct UTrapframe *utf) {
-    // LAB 9: Your code here
-    if (utf->utf_fault_va >= (uintptr_t)asan_internal_shadow_start && 
-        utf->utf_fault_va < (uintptr_t)asan_internal_shadow_end) {
-        
-        void *addr = (void*)ROUNDDOWN(utf->utf_fault_va, PAGE_SIZE);
-        
-        if (utf->utf_err & FEC_P) {
-            // COW fault - copy page
-            if (sys_alloc_region(0, UTEMP, PAGE_SIZE, PROT_RW) < 0) return 0;
-            memcpy(UTEMP, addr, PAGE_SIZE);
-            if (sys_map_region(0, UTEMP, 0, addr, PAGE_SIZE, PROT_RW) < 0) return 0;
-            sys_unmap_region(0, UTEMP, PAGE_SIZE);
-        } else {
-            // Not present - allocate new
-            if (sys_alloc_region(0, addr, PAGE_SIZE, ALLOC_ONE | PROT_RW) < 0) return 0;
+    // LAB 9: Your code here DONE
+    (void)utf;
+    if (SHADOW_ADDRESS_VALID((void *)utf->utf_fault_va)) {
+        if (sys_alloc_region(CURENVID, ROUNDDOWN((void *)utf->utf_fault_va, SHADOW_STEP), SHADOW_STEP, ALLOC_ONE | PROT_RW)) {
+            platform_abort();
         }
+
         return 1;
     }
     return 0;
@@ -111,7 +102,8 @@ platform_asan_poison(void *addr, size_t size) {
 static int
 asan_unpoison_shared_region(void *start, void *end, void *arg) {
     (void)start, (void)end, (void)arg;
-    // LAB 8: Your code here
+    // LAB 8: Your code here DONE
+    platform_asan_unpoison(start, (size_t)(end - start));
     return 0;
 }
 
@@ -129,19 +121,20 @@ platform_asan_init(void) {
      *(fill with 0's using platform_asan_unpoison())*/
 
     /* 1. Program segments (text, data, rodata, bss) */
-    // LAB 8: Your code here
+    // LAB 8: Your code here DONE
     platform_asan_unpoison(&__text_start, &__text_end - &__text_start);
     platform_asan_unpoison(&__data_start, &__data_end - &__data_start);
     platform_asan_unpoison(&__rodata_start, &__rodata_end - &__rodata_start);
     platform_asan_unpoison(&__bss_start, &__bss_end - &__bss_start);
 
     /* 2. Stacks (USER_EXCEPTION_STACK_TOP, USER_STACK_TOP) */
-    // LAB 8: Your code here
-    platform_asan_unpoison((void *)(USER_EXCEPTION_STACK_TOP - USER_EXCEPTION_STACK_SIZE), USER_EXCEPTION_STACK_SIZE);
+    // LAB 8: Your code here DONE
     platform_asan_unpoison((void *)(USER_STACK_TOP - USER_STACK_SIZE), USER_STACK_SIZE);
+    platform_asan_unpoison((void *)(USER_EXCEPTION_STACK_TOP - USER_EXCEPTION_STACK_SIZE), USER_EXCEPTION_STACK_SIZE);
+
 
     /* 3. Kernel exposed info (UENVS, UVSYS (only for lab 12)) */
-    // LAB 8: Your code here
+    // LAB 8: Your code here DONE
     platform_asan_unpoison((void *)UENVS, UENVS_SIZE);
 
     // TODO NOTE: LAB 12 code may be here

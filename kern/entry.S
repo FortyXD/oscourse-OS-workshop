@@ -37,6 +37,7 @@ save_trapframe_trap:
     jmp save_trapframe
 
 save_trapframe_syscall:
+    cli
     popq save_trapframe_ret(%rip)
     popq saved_rip(%rip)
     movq %rsp, saved_rsp(%rip)
@@ -72,7 +73,7 @@ sys_yield:
     call csys_yield
     jmp .
 
-# LAB 3: Your code here:
+# LAB 3: Your code here
 .globl sys_exit
 .type  sys_exit, @function
 sys_exit:

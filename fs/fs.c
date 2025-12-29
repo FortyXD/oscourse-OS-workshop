@@ -59,7 +59,23 @@ alloc_block(void) {
      * contains the in-use bits for BLKBITSIZE blocks.  There are
      * super->s_nblocks blocks in the disk altogether. */
 
-    // LAB 10: Your code here
+    // LAB 10: Your code here:
+    blockno_t blkno = 0, j = 0;
+
+    while (j < super->s_nblocks) {
+        if (bitmap[j / 32]) {
+            for (blockno_t i = 0; i < 32; i++) {
+                if (block_is_free(j + i)) {
+                    blkno = j + i;
+                    CLRBIT(bitmap, blkno);
+                    flush_block(&bitmap[blkno / 32]);
+                    return blkno;
+                }
+            }
+        }
+
+        j += 32;
+    }
 
     return 0;
 }
@@ -122,9 +138,34 @@ fs_init(void) {
  * Hint: Don't forget to clear any block you allocate. */
 int
 file_block_walk(struct File *f, blockno_t filebno, blockno_t **ppdiskbno, bool alloc) {
-    // LAB 10: Your code here
+    // LAB 10: Your code here:
 
-    *ppdiskbno = NULL;
+    if (filebno >= NDIRECT + NINDIRECT) {
+        return -E_INVAL;
+    }
+
+    if (filebno < NDIRECT) {
+        *ppdiskbno = f->f_direct + filebno;
+    } else {
+        if (!f->f_indirect) {
+            if (!alloc) {
+                return -E_NOT_FOUND;
+            }
+
+            blockno_t new_block = alloc_block();
+
+            if (!new_block) {
+                return -E_NO_DISK;
+            }
+
+            f->f_indirect = new_block;
+            f->f_size++;
+            memset(diskaddr(f->f_indirect), 0, BLKSIZE);
+        }
+
+        *ppdiskbno = ((blockno_t *)diskaddr(f->f_indirect)) + filebno - NDIRECT;
+    }
+
 
     return 0;
 }
@@ -139,10 +180,25 @@ file_block_walk(struct File *f, blockno_t filebno, blockno_t **ppdiskbno, bool a
  * Hint: Use file_block_walk and alloc_block. */
 int
 file_get_block(struct File *f, blockno_t filebno, char **blk) {
-    // LAB 10: Your code here
+    // LAB 10: Your code here:
+    blockno_t *pdiskbno = NULL;
+    int res = 0;
 
-    *blk = NULL;
+    if ((res = file_block_walk(f, filebno, &pdiskbno, 1))) {
+        return res;
+    }
 
+    if (!(*pdiskbno)) {
+        blockno_t new_block = alloc_block();
+
+        if (!new_block) {
+            return -E_NO_DISK;
+        }
+
+        *pdiskbno = new_block;
+    }
+
+    *blk = (char *)diskaddr(*pdiskbno);
     return 0;
 }
 

@@ -112,9 +112,27 @@ devfile_read(struct Fd *fd, void *buf, size_t n) {
      * bytes read will be written back to fsipcbuf by the file
      * system server. */
 
-    // LAB 10: Your code here:
+    // LAB 10: Your code here: DONE
     size_t res0 = 0;
     (void)fd, (void)buf, (void)n;
+
+    int status = 0;
+
+    while (res0 < n) {
+        fsipcbuf.read.req_fileid = fd->fd_file.id;
+        fsipcbuf.read.req_n = n;
+
+        status = fsipc(FSREQ_READ, NULL);
+
+        if (status <= 0) {
+            return status ? status : res0;
+        }
+
+        memcpy(buf, fsipcbuf.readRet.ret_buf, status);
+
+        buf += status;
+        res0 += status;
+    }
 
     return res0;
 }
@@ -132,9 +150,26 @@ devfile_write(struct Fd *fd, const void *buf, size_t n) {
      * bytes than requested, so that multiple IPC requests are
      * potentially required. */
 
-    // LAB 10: Your code here:
+    // LAB 10: Your code here: DONE
     size_t res0 = 0;
     (void)fd, (void)buf, (void)n;
+    int status = 0;
+
+    while (res0 < n) {
+        size_t next = MIN(n, sizeof(fsipcbuf.write.req_buf));
+        memcpy(fsipcbuf.write.req_buf, buf, next);
+        fsipcbuf.write.req_fileid = fd->fd_file.id;
+        fsipcbuf.write.req_n = next;
+
+        status = fsipc(FSREQ_WRITE, NULL);
+
+        if (status < 0) {
+            return status;
+        }
+
+        buf += status;
+        res0 += status;
+    }
 
     return res0;
 }

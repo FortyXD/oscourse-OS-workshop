@@ -73,14 +73,10 @@ KERN_BINFILES := $(shell find prog/ -type f -name '*.c' | sort)
 KERN_BINFILES := $(patsubst %.c, $(OBJDIR)/%_out, $(KERN_BINFILES))
 else
 KERN_BINLINK  := -b binary
-<<<<<<< HEAD
 KERN_BINFILES := $(shell find user -type f -name '*.c' | sort)
-=======
-KERN_BINFILES := $(shell find user/ -type f -name '*.c' | sort)
-KERN_BINFILES += fs/fs.c
->>>>>>> lab10
 KERN_BINFILES := $(patsubst %.c, $(OBJDIR)/%, $(KERN_BINFILES))
 KERN_BINFILES := $(subst //,/,$(KERN_BINFILES))
+KERN_BINFILES += $(OBJDIR)/fs/fs
 endif
 
 define PAYLOAD
