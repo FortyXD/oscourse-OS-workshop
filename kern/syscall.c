@@ -468,7 +468,20 @@ sys_ipc_recv(uintptr_t dstva, uintptr_t maxsize) {
 static int
 sys_env_set_trapframe(envid_t envid, struct Trapframe *tf) {
     // LAB 11: Your code here
+    struct Env* env = NULL;
+    if (envid2env(envid, &env, 0))
+        return -E_BAD_ENV;
 
+    user_mem_assert(env, tf, sizeof(*tf), PROT_R);
+
+    // nosan_memcpy(&env->env_tf, tf, sizeof(*tf));
+    nosan_memcpy(&env->env_tf, tf, sizeof(*tf));
+    env->env_tf.tf_ds = GD_UD | 3;
+    env->env_tf.tf_es = GD_UD | 3;
+    env->env_tf.tf_ss = GD_UD | 3;
+    env->env_tf.tf_cs = GD_UT | 3;
+    env->env_tf.tf_rflags &= 0xFFF;
+    env->env_tf.tf_rflags |= FL_IF;
     return 0;
 }
 
@@ -512,40 +525,42 @@ syscall(uintptr_t syscallno, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t
     //     return -E_NO_SYS;
     // }
     switch (syscallno) {
-    case SYS_cputs:
-        return sys_cputs((const char *)a1, (size_t)a2);
-    case SYS_cgetc:
-        return sys_cgetc();
-    case SYS_getenvid:
-        return sys_getenvid();
-    case SYS_env_destroy:
-        return sys_env_destroy((envid_t)a1);
-    case SYS_alloc_region:
-        return sys_alloc_region((envid_t)a1, (uintptr_t)a2, (size_t)a3, (int)a4);
-    case SYS_map_region:
-        return sys_map_region((envid_t)a1, (uintptr_t)a2, (envid_t)a3, (uintptr_t)a4, (size_t)a5, (int)a6);
-    case SYS_map_physical_region:
-        return sys_map_physical_region((uintptr_t)a1, (envid_t)a2, (uintptr_t)a3, (size_t)a4, (int)a5);
-    case SYS_unmap_region:
-        return sys_unmap_region((envid_t)a1, (uintptr_t)a2, (size_t)a3);
-    case SYS_region_refs:
-        return sys_region_refs((uintptr_t)a1, (size_t)a2, (uintptr_t)a3, (uintptr_t)a4);
-    case SYS_exofork:
-        return sys_exofork();
-    case SYS_env_set_status:
-        return sys_env_set_status((envid_t)a1, (int)a2);
-    // case SYS_env_set_trapframe:
-    //     return sys_env_set_trapframe((envid_t)a1, (struct Trapframe*)a2);
-    case SYS_env_set_pgfault_upcall:
-        return sys_env_set_pgfault_upcall((envid_t)a1, (void *)a2);
-    case SYS_yield:
-        sys_yield();
-    case SYS_ipc_try_send:
-        return sys_ipc_try_send((envid_t)a1, (uint32_t)a2, (uintptr_t)a3, (size_t)a4, (int)a5);
-    case SYS_ipc_recv:
-        return sys_ipc_recv((uintptr_t)a1, (uintptr_t)a2);
-    default:
-        return -E_NO_SYS;
+        case SYS_cputs:
+            return sys_cputs((const char *)a1, (size_t)a2);
+        case SYS_cgetc:
+            return sys_cgetc();
+        case SYS_getenvid:
+            return sys_getenvid();
+        case SYS_env_destroy:
+            return sys_env_destroy((envid_t)a1);
+        case SYS_exofork:
+            return sys_exofork();
+        case SYS_alloc_region:
+            return sys_alloc_region((envid_t)a1, a2, (size_t)a3, (int)a4);
+        case SYS_map_region:
+            return sys_map_region((envid_t)a1, a2,(envid_t)a3, a4, (size_t)a5, (int)a6);
+        case SYS_unmap_region:
+            return sys_unmap_region((envid_t)a1, a2,(size_t)a3);
+        case SYS_env_set_status:
+            return sys_env_set_status((envid_t)a1, (int)a2);
+        case SYS_env_set_pgfault_upcall:
+            return sys_env_set_pgfault_upcall((envid_t)a1, (void *)a2);
+        case SYS_yield:
+            sys_yield();
+            return 0;
+        case SYS_ipc_try_send:
+            return sys_ipc_try_send((envid_t)a1, (uint32_t)a2, a3, (size_t)a4, (int)a5);
+        case SYS_ipc_recv:
+            return sys_ipc_recv(a1, a2);
+        case SYS_region_refs:
+            return sys_region_refs(a1, (size_t)a2, a3, (size_t)a4);
+        case SYS_map_physical_region:
+            return sys_map_physical_region(a1, (envid_t)a2, a3, (size_t)a4, (int)a5);
+        case SYS_env_set_trapframe:
+            return sys_env_set_trapframe((envid_t) a1, (struct Trapframe *) a2);
+            return 0;
+        default:
+            return -E_NO_SYS;
     }
     // LAB 8: Your code here
     // LAB 9: Your code here

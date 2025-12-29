@@ -14,16 +14,11 @@ cputchar(int ch) {
 int
 getchar(void) {
     unsigned char c;
-
-    /* sys_cgetc does not block, but getchar should. */
-    while (!(c = sys_cgetc()));
-    /* JOS does, however, support standard _input_ redirection,
-     * allowing the user to redirect script files to the shell and such.
-     * getchar() reads a character from file descriptor 0. */
-
     int res = read(0, &c, 1);
-    return res < 0 ? res : res ? c :
-                                 -E_EOF;
+
+    if (res < 0) return res;
+    if (res == 0) return -E_EOF;
+    return c;
 }
 
 /* "Real" console file descriptor implementation.

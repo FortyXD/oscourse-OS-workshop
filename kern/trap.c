@@ -121,7 +121,8 @@ extern void thdlr17(void);
 extern void thdlr18(void);
 extern void thdlr19(void);
 extern void thdlr48(void);
-
+extern void kbd_thdlr(void);
+extern void serial_thdlr(void);
 void
 trap_init(void) {
     // LAB 4: Your code here IMPL
@@ -156,9 +157,9 @@ trap_init(void) {
      * can legally happen during normal kernel
      * code execution */
     idt[T_PGFLT].gd_ist = 1;
-
     // LAB 11: Your code here
-
+    idt[IRQ_OFFSET + IRQ_KBD] = GATE(0, GD_KT, kbd_thdlr, 3);
+    idt[IRQ_OFFSET + IRQ_SERIAL] = GATE(0, GD_KT, serial_thdlr, 3);
     /* Per-CPU setup */
     trap_init_percpu();
 }
@@ -301,6 +302,17 @@ trap_dispatch(struct Trapframe *tf) {
         // LAB 11: Your code here
         /* Handle keyboard (IRQ_KBD + kbd_intr()) and
          * serial (IRQ_SERIAL + serial_intr()) interrupts. */
+                // LAB 11: Your code here
+        /* Handle keyboard (IRQ_KBD + kbd_intr()) and
+         * serial (IRQ_SERIAL + serial_intr()) interrupts. */
+    case IRQ_OFFSET + IRQ_KBD:
+        kbd_intr();
+        sched_yield();
+        return;
+    case IRQ_OFFSET + IRQ_SERIAL:
+        serial_intr();
+        sched_yield();
+        return;
     default:
         print_trapframe(tf);
         if (!(tf->tf_cs & 3))
@@ -447,12 +459,11 @@ page_fault_handler(struct Trapframe *tf) {
 
     /* Force allocation of exception stack page to prevent memcpy from
      * causing pagefault during another pagefault */
-    // LAB 9: Your code here: DONE
+    // LAB 9: Your code here: 
     force_alloc_page(&curenv->address_space, USER_EXCEPTION_STACK_TOP - PAGE_SIZE, PAGE_SIZE);
 
-
     /* Assert existance of exception stack */
-    // LAB 9: Your code here
+    // LAB 9: Your code here:
     uintptr_t cur_ux_rsp;
 
     if (tf->tf_rsp < USER_EXCEPTION_STACK_TOP && tf->tf_rsp > USER_EXCEPTION_STACK_TOP - PAGE_SIZE) {
@@ -479,7 +490,7 @@ page_fault_handler(struct Trapframe *tf) {
 
 
     /* And then copy it userspace (nosan_memcpy()) */
-    // LAB 9: Your code here
+    // LAB 9: Your code here:
     struct AddressSpace *old_as = switch_address_space(&curenv->address_space);
     set_wp(0);
     nosan_memcpy((void *)cur_ux_rsp, (void *)&utf, sizeof(struct UTrapframe));
@@ -487,7 +498,7 @@ page_fault_handler(struct Trapframe *tf) {
     switch_address_space(old_as);
 
     /* Reset in_page_fault flag */
-    // LAB 9: Your code here
+    // LAB 9: Your code here:
     // if (envs->env_tf.tf_trapno == T_PGFLT) {
     //     in_page_fault = 0;
     // }

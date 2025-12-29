@@ -205,7 +205,7 @@ make_fs_args(char *ustack_top) {
 
     MCFG *mcfg = get_mcfg();
     if (!mcfg) {
-        cprintf("MCFG table is absent!");
+        cprintf("MCFG table is absent!\n");
         return (uintptr_t)ustack_top;
     }
 
