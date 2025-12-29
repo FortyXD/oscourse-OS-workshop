@@ -328,7 +328,6 @@ sys_unmap_region(envid_t envid, uintptr_t va, size_t size) {
  *      current environment's address space.
  *  -E_NO_MEM if there's not enough memory to map srcva in envid's
  *      address space. */
-extern int user_mem_check(struct Env *env, const void *va, size_t len, int perm);
 static int
 sys_ipc_try_send(envid_t envid, uint32_t value, uintptr_t srcva, size_t size, int perm) {
     // LAB 9: Your code here DONE

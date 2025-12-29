@@ -10,7 +10,7 @@
 
 .globl entry
 entry:
-	cli
+    cli
     # Set up kernel stack
     leaq bootstacktop(%rip),%rsp
     xor %ebp, %ebp
@@ -27,6 +27,7 @@ entry:
 
 .global save_trapframe_trap
 save_trapframe_trap:
+    cli
     popq save_trapframe_ret(%rip)
     popq saved_rip(%rip)
     popq saved_cs(%rip)
@@ -66,7 +67,7 @@ save_trapframe:
 .globl sys_yield
 .type  sys_yield, @function
 sys_yield:
-	cli
+    cli
     call save_trapframe_syscall
     call csys_yield
     jmp .
@@ -75,8 +76,8 @@ sys_yield:
 .globl sys_exit
 .type  sys_exit, @function
 sys_exit:
-	cli
-    leaq bootstacktop(%rip),%rsp
+    cli
+    leaq bootstacktop(%rip), %rsp
     xor %ebp, %ebp
     call csys_exit
     jmp .
