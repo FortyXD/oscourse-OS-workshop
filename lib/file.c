@@ -1,5 +1,6 @@
 #include <inc/fs.h>
 #include <inc/string.h>
+#include <inc/fifo.h>
 #include <inc/lib.h>
 
 union Fsipc fsipcbuf __attribute__((aligned(PAGE_SIZE)));
@@ -43,6 +44,9 @@ struct Dev devfile = {
         .dev_write = devfile_write,
         .dev_trunc = devfile_trunc};
 
+/* Открывает файл (или каталог) через файловый сервер.
+ * Для FIFO дополнительно синхронизирует open: O_WRONLY ждет читателей,
+ * O_RDONLY ждет писателей только если буфер пуст. */
 /* Open a file (or directory).
  *
  * Returns:
@@ -77,10 +81,24 @@ open(const char *path, int mode) {
 
     strcpy(fsipcbuf.open.req_path, path);
     fsipcbuf.open.req_omode = mode;
+    fsipcbuf.open.req_fd_data = (uintptr_t)fd2data(fd);
 
     if ((res = fsipc(FSREQ_OPEN, fd)) < 0) {
         fd_close(fd, 0);
         return res;
+    }
+
+    if (fd->fd_dev_id == devfifo.dev_id) {
+        struct Fifo *fifo = (struct Fifo *)fd2data(fd);
+        int omode = mode & O_ACCMODE;
+        if (omode == O_WRONLY) {
+            while (fifo->readers == 0)
+                sys_yield();
+        } else if (omode == O_RDONLY) {
+            /* Don't block if data is already buffered. */
+            while (fifo->writers == 0 && fifo->rpos == fifo->wpos)
+                sys_yield();
+        }
     }
 
     return fd2num(fd);
@@ -204,4 +222,23 @@ sync(void) {
      * by writing any dirty blocks in the buffer cache. */
 
     return fsipc(FSREQ_SYNC, NULL);
+}
+
+int
+remove(const char *path) {
+    if (strlen(path) >= MAXPATHLEN)
+        return -E_BAD_PATH;
+
+    strcpy(fsipcbuf.remove.req_path, path);
+    return fsipc(FSREQ_REMOVE, NULL);
+}
+
+/* Пользовательская обертка для создания именованного FIFO через FSREQ_MKFIFO. */
+int
+mkfifo(const char *path) {
+    if (strlen(path) >= MAXPATHLEN)
+        return -E_BAD_PATH;
+
+    strcpy(fsipcbuf.mkfifo.req_path, path);
+    return fsipc(FSREQ_MKFIFO, NULL);
 }

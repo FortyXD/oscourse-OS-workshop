@@ -133,7 +133,11 @@ devpipe_write(struct Fd *fd, const void *vbuf, size_t n) {
             /* If all the readers are gone
              * (it's only writers like us now),
              * note eof */
-            if (_pipeisclosed(fd, p)) return 0;
+            if (_pipeisclosed(fd, p)) {
+                sigval_t val = {.sival_int = 0};
+                sigqueue(0, SIGPIPE, val);
+                return i ? (ssize_t)i : -E_PIPE;
+            }
 
             /* Yield and see what happens */
             if (debug) cprintf("devpipe_write yield\n");

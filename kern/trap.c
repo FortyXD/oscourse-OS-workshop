@@ -16,6 +16,7 @@
 #include <kern/timer.h>
 #include <kern/vsyscall.h>
 #include <kern/traceopt.h>
+#include <kern/signal.h>
 
 static struct Taskstate ts;
 
@@ -386,6 +387,8 @@ trap(struct Trapframe *tf) {
         }
         if (!res) {
             in_page_fault = 0;
+            if (curenv)
+                sig_deliver_pending(curenv, tf);
             env_pop_tf(tf);
         }
     }

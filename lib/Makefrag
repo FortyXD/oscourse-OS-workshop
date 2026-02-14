@@ -26,8 +26,10 @@ LIB_SRCFILES :=		$(LIB_SRCFILES) \
 			lib/fprintf.c \
 			lib/spawn.c \
 			lib/pipe.c \
+			lib/fifo.c \
 			lib/wait.c \
-			lib/uvpt.c
+			lib/uvpt.c \
+			lib/signal.c
 
 LIB_SRCFILES :=		$(LIB_SRCFILES) \
 			lib/vsyscall.c

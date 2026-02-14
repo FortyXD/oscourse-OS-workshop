@@ -19,6 +19,7 @@
 #include <kern/traceopt.h>
 #include <kern/trap.h>
 #include <kern/vsyscall.h>
+#include <kern/signal.h>
 
 /* Currently active environment */
 struct Env *curenv = NULL;
@@ -167,6 +168,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id, enum EnvType type) {
      * of a prior environment inhabiting this Env structure
      * from "leaking" into our new environment */
     memset(&env->env_tf, 0, sizeof(env->env_tf));
+    sig_init_env(env);
 
     /* Set up appropriate initial values for the segment registers.
      * GD_UD is the user data (KD - kernel data) segment selector in the GDT, and
@@ -573,6 +575,7 @@ env_run(struct Env *env) {
 
     // LAB 8: Your code here DONE
     switch_address_space(&curenv->address_space);
+    sig_deliver_pending(curenv, &curenv->env_tf);
     env_pop_tf(&curenv->env_tf);
     panic("Must be unreachable\n");
 }

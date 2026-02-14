@@ -51,8 +51,9 @@ struct File {
 #define BLKFILES (BLKSIZE / sizeof(struct File))
 
 /* File types */
-#define FTYPE_REG 0 /* Regular file */
-#define FTYPE_DIR 1 /* Directory */
+#define FTYPE_REG  0 /* Regular file */
+#define FTYPE_DIR  1 /* Directory */
+#define FTYPE_FIFO 2 /* Named pipe */
 
 /* File system super-block (both in-memory and on-disk) */
 
@@ -75,6 +76,7 @@ enum {
     FSREQ_STAT,
     FSREQ_FLUSH,
     FSREQ_REMOVE,
+    FSREQ_MKFIFO,
     FSREQ_SYNC
 };
 
@@ -82,6 +84,7 @@ union Fsipc {
     struct Fsreq_open {
         char req_path[MAXPATHLEN];
         int req_omode;
+        uintptr_t req_fd_data;
     } open;
     struct Fsreq_set_size {
         int req_fileid;
@@ -113,6 +116,9 @@ union Fsipc {
     struct Fsreq_remove {
         char req_path[MAXPATHLEN];
     } remove;
+    struct Fsreq_mkfifo {
+        char req_path[MAXPATHLEN];
+    } mkfifo;
 
     /* Ensure Fsipc is one page */
     char _pad[PAGE_SIZE];

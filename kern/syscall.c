@@ -10,6 +10,7 @@
 #include <kern/kclock.h>
 #include <kern/pmap.h>
 #include <kern/sched.h>
+#include <kern/signal.h>
 #include <kern/syscall.h>
 #include <kern/trap.h>
 #include <kern/traceopt.h>
@@ -240,9 +241,11 @@ sys_map_region(envid_t srcenvid, uintptr_t srcva,
     struct Env *src = NULL;
     struct Env *dst = NULL;
 
-    if (envid2env(srcenvid, &src, true) < 0 || envid2env(dstenvid, &dst, true) < 0) {
+    bool allow_fs_map = (curenv && curenv->env_type == ENV_TYPE_FS && srcenvid == 0);
+    if (envid2env(srcenvid, &src, allow_fs_map ? false : true) < 0)
         return -E_BAD_ENV;
-    }
+    if (envid2env(dstenvid, &dst, allow_fs_map ? false : true) < 0)
+        return -E_BAD_ENV;
 
     if (srcva >= MAX_USER_ADDRESS || srcva & CLASS_MASK(0)) {
         return -E_INVAL;
@@ -493,6 +496,138 @@ sys_gettime(void) {
     return gettime();
 }
 
+/* Удаляет из очереди env первый сигнал, который входит в заданный набор;
+ * при необходимости возвращает запись в out. */
+static int
+sig_dequeue_matching(struct Env *env, sigset_t set, struct SigQueueEntry *out) {
+    for (uint16_t i = 0; i < env->env_sig_queue_len; i++) {
+        if (set & sig_bit(env->env_sig_queue[i].signo)) {
+            if (out)
+                *out = env->env_sig_queue[i];
+            if (i + 1 < env->env_sig_queue_len) {
+                memmove(&env->env_sig_queue[i],
+                        &env->env_sig_queue[i + 1],
+                        (env->env_sig_queue_len - i - 1) * sizeof(env->env_sig_queue[0]));
+            }
+            env->env_sig_queue_len--;
+            return 0;
+        }
+    }
+    return -E_NOT_FOUND;
+}
+
+/* Системный вызов: отправить сигнал в указанный env (0 = текущий),
+ * с передачей пользовательского значения sigval. */
+static int
+sys_sigqueue(envid_t envid, int sig, uintptr_t value) {
+    struct Env *dst = NULL;
+    if (envid == 0)
+        dst = curenv;
+    else if (envid2env(envid, &dst, 0) < 0)
+        return -E_BAD_ENV;
+
+    if (!sig_valid(sig))
+        return -E_INVAL;
+
+    sigval_t val = {.sival_ptr = (void *)value};
+    return sigqueue_env(dst, sig, val);
+}
+
+/* Системный вызов: дождаться сигнала из набора set и записать номер в *sig.
+ * Если сигнал уже в очереди, возвращает сразу, иначе блокирует env. */
+static int
+sys_sigwait(const sigset_t *set, int *sig) {
+    sigset_t kset;
+    if (!set || !sig)
+        return -E_INVAL;
+
+    user_mem_assert(curenv, set, sizeof(*set), PROT_R);
+    user_mem_assert(curenv, sig, sizeof(*sig), PROT_W);
+    nosan_memcpy(&kset, set, sizeof(kset));
+
+    if (!kset)
+        return -E_INVAL;
+
+    struct SigQueueEntry entry;
+    if (sig_dequeue_matching(curenv, kset, &entry) == 0) {
+        nosan_memcpy(sig, &entry.signo, sizeof(entry.signo));
+        return 0;
+    }
+
+    curenv->env_sig_waiting = 1;
+    curenv->env_sig_wait_set = kset;
+    curenv->env_sig_wait_oldmask = curenv->env_sig_mask;
+    curenv->env_sig_mask |= kset;
+    curenv->env_sig_wait_dst = (uintptr_t)sig;
+    curenv->env_status = ENV_NOT_RUNNABLE;
+    curenv->env_tf.tf_regs.reg_rax = 0;
+    sched_yield();
+    return 0;
+}
+
+/* Системный вызов: установить/получить действие для сигнала.
+ * Запрещает обработку SIGKILL и валидирует адрес обработчика. */
+static int
+sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
+    if (!sig_valid(sig) || sig == SIGKILL)
+        return -E_INVAL;
+
+    if (oact) {
+        user_mem_assert(curenv, oact, sizeof(*oact), PROT_W);
+        nosan_memcpy(oact, &curenv->env_sig_actions[sig], sizeof(*oact));
+    }
+
+    if (!act)
+        return 0;
+
+    user_mem_assert(curenv, act, sizeof(*act), PROT_R);
+    struct sigaction newact;
+    nosan_memcpy(&newact, act, sizeof(newact));
+
+    void *handler = (newact.sa_flags & SA_SIGINFO) ? (void *)newact.sa_sigaction : (void *)newact.sa_handler;
+    if (handler != SIG_DFL && handler != SIG_IGN && (uintptr_t)handler >= MAX_USER_ADDRESS)
+        return -E_INVAL;
+
+    curenv->env_sig_actions[sig] = newact;
+    return 0;
+}
+
+/* Системный вызов: завершить обработчик сигнала и восстановить контекст
+ * (trapframe и маску сигналов) из пользовательского Sigframe. */
+static int
+sys_sigreturn(const struct Sigframe *frame) {
+    if (!frame)
+        return -E_INVAL;
+
+    user_mem_assert(curenv, frame, sizeof(*frame), PROT_R);
+    struct Sigframe sf;
+    nosan_memcpy(&sf, frame, sizeof(sf));
+
+    if (sf.sf_tf.tf_rip >= MAX_USER_ADDRESS || sf.sf_tf.tf_rsp >= MAX_USER_ADDRESS)
+        return -E_INVAL;
+
+    sf.sf_tf.tf_ds = GD_UD | 3;
+    sf.sf_tf.tf_es = GD_UD | 3;
+    sf.sf_tf.tf_ss = GD_UD | 3;
+    sf.sf_tf.tf_cs = GD_UT | 3;
+    sf.sf_tf.tf_rflags &= 0xFFF;
+    sf.sf_tf.tf_rflags |= FL_IF;
+
+    curenv->env_tf = sf.sf_tf;
+    curenv->env_sig_mask = sf.sf_oldmask;
+    return 0;
+}
+
+/* Системный вызов: зарегистрировать адрес пользовательского трамплина
+ * для доставки сигналов (env_sigentry). */
+static int
+sys_sigentry(uintptr_t entry) {
+    if (entry >= MAX_USER_ADDRESS)
+        return -E_INVAL;
+    curenv->env_sigentry = (void *)entry;
+    return 0;
+}
+
 /*
  * This function return the difference between maximal
  * number of references of regions [addr, addr + size] and [addr2,addr2+size2]
@@ -569,6 +704,16 @@ syscall(uintptr_t syscallno, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t
             return 0;
         case SYS_gettime:
             return sys_gettime();
+        case SYS_sigqueue:
+            return sys_sigqueue((envid_t)a1, (int)a2, a3);
+        case SYS_sigwait:
+            return sys_sigwait((const sigset_t *)a1, (int *)a2);
+        case SYS_sigaction:
+            return sys_sigaction((int)a1, (const struct sigaction *)a2, (struct sigaction *)a3);
+        case SYS_sigreturn:
+            return sys_sigreturn((const struct Sigframe *)a1);
+        case SYS_sigentry:
+            return sys_sigentry(a1);
         default:
             return -E_NO_SYS;
     }

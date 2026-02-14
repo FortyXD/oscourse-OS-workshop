@@ -477,3 +477,27 @@ fs_sync(void) {
         flush_block(diskaddr(i));
     }
 }
+
+int
+file_remove(const char *path) {
+    struct File *dir, *f;
+    int res = walk_path(path, &dir, &f, NULL);
+    if (res < 0)
+        return res;
+    if (!f)
+        return -E_NOT_FOUND;
+    if (f == &super->s_root)
+        return -E_NOT_SUPP;
+
+    if (f->f_type == FTYPE_DIR && f->f_size)
+        return -E_NOT_SUPP;
+
+    file_truncate_blocks(f, 0);
+    f->f_size = 0;
+    f->f_type = 0;
+    f->f_name[0] = '\0';
+    file_flush(f);
+    if (dir)
+        file_flush(dir);
+    return 0;
+}

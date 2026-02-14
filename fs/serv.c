@@ -5,6 +5,7 @@
 
 #include <inc/x86.h>
 #include <inc/string.h>
+#include <inc/fifo.h>
 
 #include "pci.h"
 #include "fs.h"
@@ -35,12 +36,72 @@ struct OpenFile {
     struct Fd *o_fd;     /* Fd page */
 };
 
+#define FIFO_BASE (FILE_BASE + MAXOPEN * PAGE_SIZE)
+
+struct FifoState {
+    struct File *file;
+    struct Fifo *fifo;
+    bool in_use;
+};
+
+static struct FifoState fifo_states[MAXOPEN];
+static uintptr_t fifo_next_va = FIFO_BASE;
+
+/* Ищет состояние FIFO по inode (struct File *) в таблице fifo_states. */
+static struct FifoState *
+fifo_state_lookup(struct File *file) {
+    for (size_t i = 0; i < MAXOPEN; i++) {
+        if (fifo_states[i].in_use && fifo_states[i].file == file)
+            return &fifo_states[i];
+    }
+    return NULL;
+}
+
+/* Возвращает существующее состояние FIFO или создает новое:
+ * выделяет общую страницу FIFO в адресном пространстве сервера и инициализирует ее. */
+static struct FifoState *
+fifo_state_get_or_create(struct File *file) {
+    struct FifoState *state = fifo_state_lookup(file);
+    if (state)
+        return state;
+
+    for (size_t i = 0; i < MAXOPEN; i++) {
+        if (!fifo_states[i].in_use) {
+            if (sys_alloc_region(0, (void *)fifo_next_va, PAGE_SIZE, PROT_RW | PROT_SHARE) < 0)
+                return NULL;
+            fifo_states[i].in_use = 1;
+            fifo_states[i].file = file;
+            fifo_states[i].fifo = (struct Fifo *)fifo_next_va;
+            memset((void *)fifo_next_va, 0, PAGE_SIZE);
+            fifo_next_va += PAGE_SIZE;
+            return &fifo_states[i];
+        }
+    }
+    return NULL;
+}
+
 /* initialize to force into data section */
 struct OpenFile opentab[MAXOPEN] = {
         {0, 0, 1, 0}};
 
 /* Virtual address at which to receive page mappings containing client requests. */
 union Fsipc *fsreq = (union Fsipc *)0x0FFFF000;
+
+static void
+fs_ipc_send(envid_t to_env, uint32_t val, void *pg, size_t size, int perm) {
+    if (!pg)
+        pg = (void *)MAX_USER_ADDRESS;
+
+    int res;
+    do {
+        res = sys_ipc_try_send(to_env, val, pg, size, perm);
+        if (res == -E_BAD_ENV)
+            return;
+        if (res && res != -E_IPC_NOT_RECV)
+            panic("fs_ipc_send: failed to send %u to env %d, errno %i\n", val, to_env, res);
+        sys_yield();
+    } while (res);
+}
 
 void
 serve_init(void) {
@@ -89,6 +150,8 @@ openfile_lookup(envid_t envid, uint32_t fileid, struct OpenFile **po) {
 /* Open req->req_path in mode req->req_omode, storing the Fd page and
  * permissions to return to the calling environment in *pg_store and
  * *perm_store respectively. */
+/* Обрабатывает открытие файла.
+ * Для FIFO выделяет/находит общую страницу, мэпит ее в клиента и обновляет счетчики. */
 int
 serve_open(envid_t envid, struct Fsreq_open *req,
            void **pg_store, int *perm_store) {
@@ -145,7 +208,33 @@ serve_open(envid_t envid, struct Fsreq_open *req,
     /* Fill out the Fd structure */
     o->o_fd->fd_file.id = o->o_fileid;
     o->o_fd->fd_omode = req->req_omode & O_ACCMODE;
-    o->o_fd->fd_dev_id = devfile.dev_id;
+    if (f->f_type == FTYPE_FIFO) {
+        struct FifoState *state = fifo_state_get_or_create(f);
+        if (!state)
+            return -E_NO_MEM;
+
+        if (req->req_fd_data >= MAX_USER_ADDRESS)
+            return -E_INVAL;
+
+        int map_res = sys_map_region(0, state->fifo, envid, (void *)req->req_fd_data,
+                                     PAGE_SIZE, PROT_RW | PROT_SHARE);
+        if (map_res < 0)
+            return map_res;
+
+        int omode = o->o_fd->fd_omode;
+        if (omode == O_RDONLY)
+            __atomic_fetch_add(&state->fifo->readers, 1, __ATOMIC_ACQ_REL);
+        else if (omode == O_WRONLY)
+            __atomic_fetch_add(&state->fifo->writers, 1, __ATOMIC_ACQ_REL);
+        else if (omode == O_RDWR) {
+            __atomic_fetch_add(&state->fifo->readers, 1, __ATOMIC_ACQ_REL);
+            __atomic_fetch_add(&state->fifo->writers, 1, __ATOMIC_ACQ_REL);
+        }
+
+        o->o_fd->fd_dev_id = devfifo.dev_id;
+    } else {
+        o->o_fd->fd_dev_id = devfile.dev_id;
+    }
     o->o_mode = req->req_omode;
 
     if (debug) cprintf("sending success, page %08lx\n", (unsigned long)o->o_fd);
@@ -271,6 +360,59 @@ serve_flush(envid_t envid, union Fsipc *ipc) {
     return 0;
 }
 
+/* Удаляет файл по пути; если это FIFO — очищает соответствующее состояние
+ * и размэпливает страницу FIFO в сервере. */
+int
+serve_remove(envid_t envid, union Fsipc *ipc) {
+    struct Fsreq_remove *req = &ipc->remove;
+    char path[MAXPATHLEN];
+    struct File *f = NULL;
+    struct FifoState *state = NULL;
+
+    memmove(path, req->req_path, MAXPATHLEN);
+    path[MAXPATHLEN - 1] = 0;
+
+    int res = file_open(path, &f);
+    if (res < 0)
+        return res;
+
+    if (f->f_type == FTYPE_FIFO)
+        state = fifo_state_lookup(f);
+
+    res = file_remove(path);
+    if (res < 0)
+        return res;
+
+    if (state) {
+        sys_unmap_region(0, state->fifo, PAGE_SIZE);
+        state->in_use = 0;
+        state->file = NULL;
+        state->fifo = NULL;
+    }
+
+    return 0;
+}
+
+/* Создает именованный FIFO: создает inode и выставляет тип FTYPE_FIFO. */
+int
+serve_mkfifo(envid_t envid, union Fsipc *ipc) {
+    struct Fsreq_mkfifo *req = &ipc->mkfifo;
+    char path[MAXPATHLEN];
+    struct File *f;
+    int res;
+
+    memmove(path, req->req_path, MAXPATHLEN);
+    path[MAXPATHLEN - 1] = 0;
+
+    if ((res = file_create(path, &f)) < 0)
+        return res;
+
+    f->f_type = FTYPE_FIFO;
+    f->f_size = 0;
+    file_flush(f);
+    return 0;
+}
+
 int
 serve_sync(envid_t envid, union Fsipc *req) {
     fs_sync();
@@ -287,6 +429,8 @@ fshandler handlers[] = {
         [FSREQ_FLUSH] = serve_flush,
         [FSREQ_WRITE] = serve_write,
         [FSREQ_SET_SIZE] = serve_set_size,
+        [FSREQ_REMOVE] = serve_remove,
+        [FSREQ_MKFIFO] = serve_mkfifo,
         [FSREQ_SYNC] = serve_sync};
 #define NHANDLERS (sizeof(handlers) / sizeof(handlers[0]))
 
@@ -321,7 +465,7 @@ serve(void) {
             cprintf("Invalid request code %d from %08x\n", req, whom);
             res = -E_INVAL;
         }
-        ipc_send(whom, res, pg, PAGE_SIZE, perm);
+        fs_ipc_send(whom, res, pg, PAGE_SIZE, perm);
         sys_unmap_region(0, fsreq, PAGE_SIZE);
     }
 }
